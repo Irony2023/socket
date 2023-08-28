@@ -2,6 +2,8 @@ import socket
 import pickle
 import cv2
 import struct
+import sys
+import yaml
 
 
 def send_data(conn, payload, data_id=0):
@@ -51,34 +53,52 @@ key_message = "C0nn3c+10n"
 data = {"data number": 0, "message": "A new message has been arrived from client"}
 
 
-def main():
+def main(config):
     # create client socket object and connect it to server
     conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    conn.connect(("127.0.0.1", 12345))
-    send_data(conn, key_message)
+    conn.connect((config["ip"], config["port"]))
+    send_data(conn, config["key_message"])
     first_payload = receive_data(conn)[1]
     if first_payload == "You are not authorized":
         print("[ERROR]: Access denied")
     else:
-        # send a dictionary data and image data in loop till keyboard interrupt is received
+        # send a cam data in loop till keyboard interrupt is received
+        cap = cv2.VideoCapture(0)
+        if not cap.isOpened():
+            print("[ERROR]: Failed to open camera")
+            conn.close()
+            sys.exit()
         while True:
             try:
                 # send dict
                 data["data number"] += 1
-                send_data(conn, data, data_identifiers["data"])
+                send_data(conn, data, config["data_identifiers"]["data"])
                 print(receive_data(conn)[1])
                 # send image
-                image = cv2.imread("client_data/sample_image.png", 0)
-                send_data(conn, image, data_identifiers["image"])
-                print(receive_data(conn)[1])
+                ret, frame = cap.read()
+                if not ret:
+                    print("[ERROR]: Failed to read frame")
+                    break
+                else:
+                    if config["client"]["resize_image"]:
+                        frame = cv2.resize(
+                            frame,
+                            (config["client"]["height"], config["client"]["width"]),
+                        )
+                    if config["client"]["grayscale"]:
+                        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                    send_data(conn, frame, config["data_identifiers"]["image"])
+                    print(receive_data(conn)[1])
             except KeyboardInterrupt:
                 print("\n[INFO]: Keyboard Interrupt received")
                 # once keyboard interrupt is received, send signal to server for closing connection
                 send_data(conn, "bye")
     # close connection
     conn.close()
-    # print("[INFO]: Connection closed")
+    print("[INFO]: Connection closed")
 
 
 if __name__ == "__main__":
-    main()
+    with open("config.yaml", "r") as file:
+        config = yaml.safe_load(file)
+    main(config)
